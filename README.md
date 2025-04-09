@@ -1,6 +1,6 @@
 # CSM Cerebrium Deployment
 
-**2025/04/08** - This repository contains a working deployment of the Sesame CSM-1B model on Cerebrium, providing a scalable API for text-to-speech generation.
+**2025/04/08 UPDATE** - This repository contains a working deployment of the Sesame CSM-1B model on Cerebrium with the Llama-3.2-1B tokenizer. Our implementation generates high-quality speech from text input through a scalable API endpoint.
 
 **Original 2025/03/13** - Sesame released the 1B CSM variant. The checkpoint is [hosted on Hugging Face](https://huggingface.co/sesame/csm-1b).
 
@@ -163,6 +163,13 @@ Johan Schalkwyk, Ankit Kumar, Dan Lyth, Sefik Emre Eskimez, Zack Hodari, Cinjon 
 
 This repository extends the CSM-1B model to provide a deployable API on the Cerebrium platform. The implementation enables text-to-speech generation through a simple HTTP endpoint. The deployed API accepts text input and returns base64-encoded WAV audio data.
 
+**Key Features of Our Implementation:**
+
+- **Llama-3.2-1B Tokenizer Integration**: Uses the official Llama tokenizer for optimal speech generation quality
+- **Robust Error Handling**: Includes sophisticated fallback mechanisms with parameter adjustment when initial generation fails
+- **Intelligent Retries**: Automatically attempts generation with different parameters if initial attempt produces no output
+- **Comprehensive Testing**: Includes test scripts for both local development and remote API testing
+
 ## Setup & Deployment
 
 ### Prerequisites
@@ -190,10 +197,74 @@ This repository extends the CSM-1B model to provide a deployable API on the Cere
    ```
    This uses the configuration in `cerebrium.toml` to set up the deployment with appropriate compute resources.
 
+## Local Development vs. Cerebrium Deployment
+
+### Local Development
+
+1. **Environment Setup**
+   ```bash
+   git clone https://github.com/rohankatakam/csm_cerebrium.git
+   cd csm_cerebrium
+   python3.10 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   
+   # Important: Disable lazy compilation in Mimi
+   export NO_TORCH_COMPILE=1
+   ```
+
+2. **Hugging Face Authentication**
+   ```bash
+   huggingface-cli login
+   ```
+   You'll need access to both the [CSM-1B](https://huggingface.co/sesame/csm-1b) and [Llama-3.2-1B](https://huggingface.co/meta-llama/Llama-3.2-1B) models.
+
+3. **Local Testing**
+   ```bash
+   # Test with default phrase and minimal context
+   python test_with_context.py
+   
+   # Test with custom phrase
+   python test_with_context.py --text "Your custom phrase here"
+   
+   # Test without context (not recommended)
+   python test_with_context.py --no-context
+   ```
+
+### Cerebrium Deployment
+
+1. **Install Cerebrium CLI**
+   ```bash
+   pip install cerebrium-cli
+   ```
+
+2. **Deploy to Cerebrium**
+   ```bash
+   cerebrium deploy
+   ```
+   The deployment uses the configuration in `cerebrium.toml` which specifies GPU requirements, Python version, etc.
+
+3. **Test Deployed API**
+   ```bash
+   # Set your Cerebrium inference token
+   export CEREBRIUM_TOKEN=YOUR_INFERENCE_TOKEN
+   
+   # Test with the phrase "What up dog?"
+   python test_phrase.py --text "What up dog?" --endpoint "https://api.cortex.cerebrium.ai/v4/{project_id}/{deployment_name}/generate_audio"
+   ```
+
+### When to Deploy to Cerebrium
+
+- **Development Phase**: Use local testing with `test_with_context.py` for rapid iteration and debugging
+- **Production Readiness**: Once your local tests are successful, deploy to Cerebrium for production use
+- **Code Changes**: After significant code changes (like updating the tokenizer), redeploy to Cerebrium
+- **Scaling Needs**: When you need to scale beyond your local resources or need high availability
+
 ### Known Issues & Solutions
 
 - **Missing hf_transfer package**: Added to requirements.txt and disabled with environment variable `HF_HUB_ENABLE_HF_TRANSFER=0` in main.py
-- **Llama 3.2 1B model access**: If you don't have access, the code is designed to work without it
+- **Llama 3.2 1B model access**: Required for optimal performance - our implementation now uses the proper Llama-3.2-1B tokenizer
+- **Silent Audio Output**: Fixed by using the correct Llama tokenizer and implementing robust fallback mechanisms
 - **API Authentication**: Requires an Inference Token from your Cerebrium dashboard
 
 ## Using the API
@@ -283,12 +354,38 @@ else:
 
 ## Performance Considerations
 
-- The API typically responds in 300-500ms for short text inputs
-- For longer texts, response time scales approximately linearly
+- The API typically responds in 5-10 seconds for short text inputs on Cerebrium
+- For longer texts, response time scales approximately linearly with text length
+- Local testing is faster but requires appropriate GPU hardware
 - The deployment is configured to automatically scale based on demand
+
+## Implementation Details
+
+### Core Components
+
+1. **Tokenization**: Uses the Llama-3.2-1B tokenizer for text processing
+2. **Error Handling**: 
+   - Detects empty sample cases and implements intelligent retry with modified parameters
+   - Reduces temperature and narrows top-k sampling for more focused generation
+   - Can simplify long prompts if needed
+3. **Context Support**: Designed to work best with audio context (previous speech segments)
+
+### Testing Scripts
+
+- **test_phrase.py**: For testing the deployed Cerebrium API
+- **test_with_context.py**: For local testing with proper context handling
+
+## Best Practices
+
+1. **Test Locally First**: Always test changes locally before deploying to Cerebrium
+2. **Use Context When Possible**: The model works best with proper context
+3. **Monitor Log Output**: Check for warnings about empty samples or retries
+4. **Verify Audio Quality**: Always verify the audio outputs match expectations
+5. **Track File Sizes**: Silent audio typically has a larger file size with repeating patterns
 
 ## Future Improvements
 
 - Streaming audio response for real-time applications
-- Support for audio context to create more natural continuations
+- Better context handling for more natural conversational speech
 - Voice cloning capabilities
+- Fine-tuning for specialized domains
