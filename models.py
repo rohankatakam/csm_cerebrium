@@ -6,6 +6,27 @@ import torchtune
 from huggingface_hub import PyTorchModelHubMixin
 from torchtune.models import llama3_2
 
+# Import our Gemini model wrapper
+# Conditionally import Gemini models
+GEMINI_AVAILABLE = False
+try:
+    from google import genai
+    print("Google Generative AI package available, Gemini integration enabled")
+    try:
+        from gemini_model import gemini_flash_1B, gemini_flash_100M
+        GEMINI_AVAILABLE = True
+        print("Successfully imported Gemini models")
+    except ImportError as e:
+        print(f"Warning: Could not import Gemini models: {e}")
+except ImportError:
+    print("Google Generative AI package not available, Gemini integration disabled")
+    # Define dummy functions to avoid errors
+    def gemini_flash_1B(*args, **kwargs):
+        raise ImportError("Gemini models not available - google-generativeai package missing")
+    
+    def gemini_flash_100M(*args, **kwargs):
+        raise ImportError("Gemini models not available - google-generativeai package missing")
+
 
 def llama3_2_1B() -> torchtune.modules.transformer.TransformerDecoder:
     return llama3_2.llama3_2(
@@ -42,6 +63,8 @@ def llama3_2_100M() -> torchtune.modules.transformer.TransformerDecoder:
 FLAVORS = {
     "llama-1B": llama3_2_1B,
     "llama-100M": llama3_2_100M,
+    "gemini-1B": gemini_flash_1B,
+    "gemini-100M": gemini_flash_100M,
 }
 
 

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Tuple
+import os
 
 import torch
 import torchaudio
@@ -9,6 +10,9 @@ from moshi.models import loaders
 from tokenizers.processors import TemplateProcessing
 from transformers import AutoTokenizer
 from watermarking import CSM_1B_GH_WATERMARK, load_watermarker, watermark
+
+# Import the new Gemini tokenizer
+from gemini_tokenizer import GeminiTokenizer
 
 
 @dataclass
@@ -39,6 +43,18 @@ def load_llama3_tokenizer():
     return tokenizer
 
 
+def load_gemini_tokenizer():
+    """
+    Implementation using Gemini 2.0 Flash tokenizer
+    """
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY environment variable must be set to use Gemini tokenizer")
+        
+    tokenizer = GeminiTokenizer(api_key=api_key)
+    return tokenizer
+
+
 class Generator:
     def __init__(
         self,
@@ -46,8 +62,20 @@ class Generator:
     ):
         self._model = model
         self._model.setup_caches(1)
-
-        self._text_tokenizer = load_llama3_tokenizer()
+        
+        # Check if we should use Gemini tokenizer based on model flavor
+        if hasattr(self._model, 'config') and hasattr(self._model.config, 'backbone_flavor'):
+            if 'gemini' in self._model.config.backbone_flavor:
+                try:
+                    self._text_tokenizer = load_gemini_tokenizer()
+                    print("Using Gemini tokenizer")
+                except Exception as e:
+                    print(f"Error loading Gemini tokenizer: {e}. Falling back to Llama tokenizer.")
+                    self._text_tokenizer = load_llama3_tokenizer()
+            else:
+                self._text_tokenizer = load_llama3_tokenizer()
+        else:
+            self._text_tokenizer = load_llama3_tokenizer()
 
         device = next(model.parameters()).device
         mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
@@ -224,9 +252,59 @@ class Generator:
         return audio
 
 
-def load_csm_1b(device: str = "cuda") -> Generator:
-    model = Model.from_pretrained("sesame/csm-1b")
-    model.to(device=device, dtype=torch.bfloat16)
+def load_csm_1b(device: str = "cuda", use_gemini: bool = False, dtype=None) -> Generator:
+    """
+    Load the CSM-1B model, optionally using Gemini instead of Llama.
+    
+    Args:
+        device: Device to load the model on ("cuda", "cpu", or "mps")
+        use_gemini: Whether to use Gemini model instead of Llama
+        dtype: Data type for the model (default: None, which will select an appropriate type)
+        
+    Returns:
+        Generator instance
+    """
+    # Determine appropriate dtype if not provided
+    if dtype is None:
+        if device == "mps":
+            # On MPS, bfloat16 is only supported on newer MacOS versions
+            try:
+                # Try creating a small tensor to test bfloat16 support
+                # Test BFloat16 compatibility without creating unused variables
+                torch.zeros(1, dtype=torch.bfloat16, device=device)
+                dtype = torch.bfloat16
+                print("Using bfloat16 on MPS device")
+            except Exception:
+                # Fall back to float32 if bfloat16 is not supported
+                dtype = torch.float32
+                print("MPS device doesn't support bfloat16, using float32 instead")
+        else:
+            # For CUDA and CPU, use bfloat16
+            dtype = torch.bfloat16
+            print(f"Using bfloat16 on {device} device")
+    
+    if use_gemini:
+        # Create a custom model with Gemini backbone
+        from models import Model, ModelArgs
+        
+        config = ModelArgs(
+            backbone_flavor="gemini-1B",  # Use Gemini 1B as backbone
+            decoder_flavor="gemini-100M",  # Use smaller Gemini for decoder
+            text_vocab_size=128_256,
+            audio_vocab_size=1024,
+            audio_num_codebooks=32
+        )
+        
+        model = Model(config)
+        model.to(device=device, dtype=dtype)
+        
+        # Check for API key
+        if "GOOGLE_API_KEY" not in os.environ:
+            print("WARNING: GOOGLE_API_KEY environment variable not set. Gemini model won't work properly.")
+    else:
+        # Load the original CSM-1B model
+        model = Model.from_pretrained("sesame/csm-1b")
+        model.to(device=device, dtype=dtype)
 
     generator = Generator(model)
     return generator

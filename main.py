@@ -5,9 +5,59 @@ import base64
 import torch
 import torchaudio
 from generator import load_csm_1b
+import dotenv
 
 # Disable HF Transfer to avoid dependency issues on Cerebrium
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+
+# Load environment variables from .env file if it exists
+dotenv.load_dotenv()
+
+# First, check if google-generativeai is actually available
+GEMINI_AVAILABLE = False
+
+# Add diagnostic information to help debug Cerebrium issues
+print("=== Cerebrium Deployment Diagnostics ===")
+import sys
+print(f"Python version: {sys.version}")
+print(f"Python executable: {sys.executable}")
+print(f"Installed packages:")
+import subprocess
+subprocess.call([sys.executable, "-m", "pip", "list"])
+print("=======================================")
+
+try:
+    print("Attempting to import google-generativeai...")
+    import google.generativeai
+    print("Successfully imported google.generativeai!")
+    GEMINI_AVAILABLE = True
+except ImportError as e:
+    print(f"ERROR importing google.generativeai: {e}")
+    GEMINI_AVAILABLE = False
+    try:
+        # Try installing it directly as a last resort
+        print("Attempting to install google-generativeai package directly...")
+        subprocess.call([sys.executable, "-m", "pip", "install", "google-generativeai==0.8.1"])
+        import google.generativeai
+        print("Successfully installed and imported google.generativeai!")
+        GEMINI_AVAILABLE = True
+    except Exception as e2:
+        print(f"Failed to install google-generativeai: {e2}")
+
+# Check if we should use Gemini
+USE_GEMINI = os.environ.get("USE_GEMINI", "false").lower() == "true" and GEMINI_AVAILABLE
+
+# Make sure we have an API key if using Gemini
+if USE_GEMINI and "GOOGLE_API_KEY" not in os.environ:
+    print("WARNING: USE_GEMINI is set to true but GOOGLE_API_KEY is not set.")
+    print("Gemini model will not work properly without an API key.")
+    USE_GEMINI = False
+    print("Falling back to Llama model.")
+
+if USE_GEMINI and not GEMINI_AVAILABLE:
+    print("WARNING: USE_GEMINI is set to true but google-generativeai package is not available.")
+    USE_GEMINI = False
+    print("Falling back to Llama model.")
 
 # This device selection lets our code work on any Cerebrium hardware
 if torch.backends.mps.is_available():
@@ -21,12 +71,19 @@ print(f"Using device: {device}")
 
 # Load the CSM-1B generator - this happens once when the service starts
 try:
-    print("Loading CSM-1B model...")
+    if USE_GEMINI:
+        print("Loading CSM-1B model with Gemini 2.0 Flash backbone...")
+    else:
+        print("Loading standard CSM-1B model with Llama backbone...")
+        
     start_time = time.time()
-    generator = load_csm_1b(device=device)
+    generator = load_csm_1b(device=device, use_gemini=USE_GEMINI)
     load_time = time.time() - start_time
     print(f"CSM-1B model loaded successfully in {load_time:.2f} seconds!")
     print(f"Model is ready for inference with sample rate: {generator.sample_rate} Hz")
+    
+    if USE_GEMINI:
+        print("Using Gemini 2.0 Flash for text generation")
 except Exception as e:
     import traceback
     print(f"Error loading CSM-1B model: {str(e)}")
@@ -53,7 +110,7 @@ def generate_audio(text: str, speaker=0, max_audio_length_ms=30000, temperature=
         global generator
         if 'generator' not in globals() or generator is None:
             print("Loading generator on demand...")
-            generator = load_csm_1b(device=device)
+            generator = load_csm_1b(device=device, use_gemini=USE_GEMINI)
         
         # Log the request
         print(f"Generating audio for text: '{text}'")
