@@ -21,20 +21,20 @@ class Segment:
 
 def load_llama3_tokenizer():
     """
-    Alternative implementation using T5 tokenizer since Llama 3.2 1B requires approval
+    Original implementation using Llama 3.2 1B tokenizer
+    https://github.com/huggingface/transformers/issues/22794#issuecomment-2092623992
     """
-    tokenizer_name = "google-t5/t5-small"  # Using T5 as an alternative
+    tokenizer_name = "meta-llama/Llama-3.2-1B"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    bos = tokenizer.pad_token  # T5 doesn't have explicit BOS, using PAD
+    bos = tokenizer.bos_token
     eos = tokenizer.eos_token
     
-    # Configure tokenizer post-processing if available
-    if hasattr(tokenizer, '_tokenizer') and hasattr(tokenizer._tokenizer, 'post_processor'):
-        tokenizer._tokenizer.post_processor = TemplateProcessing(
-            single=f"{bos}:0 $A:0 {eos}:0",
-            pair=f"{bos}:0 $A:0 {eos}:0 {bos}:1 $B:1 {eos}:1",
-            special_tokens=[(f"{bos}", tokenizer.pad_token_id), (f"{eos}", tokenizer.eos_token_id)],
-        )
+    # Configure tokenizer post-processing
+    tokenizer._tokenizer.post_processor = TemplateProcessing(
+        single=f"{bos}:0 $A:0 {eos}:0",
+        pair=f"{bos}:0 $A:0 {eos}:0 {bos}:1 $B:1 {eos}:1",
+        special_tokens=[(f"{bos}", tokenizer.bos_token_id), (f"{eos}", tokenizer.eos_token_id)],
+    )
 
     return tokenizer
 
@@ -159,6 +159,59 @@ class Generator:
             ).unsqueeze(1)
             curr_pos = curr_pos[:, -1:] + 1
 
+        # Handle case where samples list is empty
+        if not samples:
+            print("Warning: No audio samples were generated! Using fallback approach.")
+            
+            # Retry with different temperature and topk settings
+            print("Retrying with different generation parameters...")
+            self._model.reset_caches()
+            
+            # Use more conservative settings for the retry
+            retry_temp = max(0.2, temperature - 0.3)  # Lower temperature
+            retry_topk = min(10, topk)  # More focused sampling
+            
+            # Simplify the prompt to just the core text
+            simplified_text = text
+            if len(simplified_text) > 50:
+                simplified_text = simplified_text[:50]  # Use shorter text if original is long
+            
+            print(f"Retry with temp={retry_temp}, topk={retry_topk}, text='{simplified_text}'")
+            
+            # Retry prompt tokenization
+            gen_segment_tokens, gen_segment_tokens_mask = self._tokenize_text_segment(simplified_text, speaker)
+            prompt_tokens = gen_segment_tokens.long().to(self.device)
+            prompt_tokens_mask = gen_segment_tokens_mask.bool().to(self.device)
+            
+            # Try generation again with simplified approach
+            retry_samples = []
+            curr_tokens = prompt_tokens.unsqueeze(0)
+            curr_tokens_mask = prompt_tokens_mask.unsqueeze(0)
+            curr_pos = torch.arange(0, prompt_tokens.size(0)).unsqueeze(0).long().to(self.device)
+            
+            # Generate with a forced minimum
+            for _ in range(24):  # Force at least a short clip (~1s)
+                sample = self._model.generate_frame(curr_tokens, curr_tokens_mask, curr_pos, retry_temp, retry_topk)
+                retry_samples.append(sample)
+                
+                # Update for next iteration
+                curr_tokens = torch.cat([sample, torch.zeros(1, 1).long().to(self.device)], dim=1).unsqueeze(1)
+                curr_tokens_mask = torch.cat(
+                    [torch.ones_like(sample).bool(), torch.zeros(1, 1).bool().to(self.device)], dim=1
+                ).unsqueeze(1)
+                curr_pos = curr_pos[:, -1:] + 1
+            
+            # If retry still failed, generate noise as last resort
+            if not retry_samples:
+                print("Retry failed! Generating noise pattern as last resort")
+                # Generate a soft noise pattern that won't be completely silent
+                noise = torch.randn(self.sample_rate).to(self.device) * 0.01
+                return noise
+                
+            # Use retry samples instead
+            print(f"Retry succeeded with {len(retry_samples)} samples")
+            samples = retry_samples
+        
         audio = self._audio_tokenizer.decode(torch.stack(samples).permute(1, 2, 0)).squeeze(0).squeeze(0)
 
         # This applies an imperceptible watermark to identify audio as AI-generated.

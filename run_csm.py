@@ -3,7 +3,6 @@ import torch
 import torchaudio
 from huggingface_hub import hf_hub_download
 from generator import load_csm_1b, Segment
-from dataclasses import dataclass
 
 # Disable Triton compilation
 os.environ["NO_TORCH_COMPILE"] = "1"
