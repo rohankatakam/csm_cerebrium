@@ -1,6 +1,8 @@
-# CSM
+# CSM Cerebrium Deployment
 
-**2025/03/13** - We are releasing the 1B CSM variant. The checkpoint is [hosted on Hugging Face](https://huggingface.co/sesame/csm_1b).
+**2025/04/08** - This repository contains a working deployment of the Sesame CSM-1B model on Cerebrium, providing a scalable API for text-to-speech generation.
+
+**Original 2025/03/13** - Sesame released the 1B CSM variant. The checkpoint is [hosted on Hugging Face](https://huggingface.co/sesame/csm-1b).
 
 ---
 
@@ -152,3 +154,141 @@ By using this model, you agree to comply with all applicable laws and ethical gu
 
 ## Authors
 Johan Schalkwyk, Ankit Kumar, Dan Lyth, Sefik Emre Eskimez, Zack Hodari, Cinjon Resnick, Ramon Sanabria, Raven Jiang, and the Sesame team.
+
+---
+
+# Cerebrium Deployment Guide
+
+## Overview
+
+This repository extends the CSM-1B model to provide a deployable API on the Cerebrium platform. The implementation enables text-to-speech generation through a simple HTTP endpoint. The deployed API accepts text input and returns base64-encoded WAV audio data.
+
+## Setup & Deployment
+
+### Prerequisites
+
+- Cerebrium account - Sign up at [cerebrium.ai](https://cerebrium.ai)
+- Cerebrium CLI - Install with `pip install cerebrium-cli`
+- Python 3.10 or newer
+
+### Deployment Steps
+
+1. **Clone this repository**
+   ```bash
+   git clone https://github.com/rohankatakam/csm_cerebrium.git
+   cd csm_cerebrium
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Deploy to Cerebrium**
+   ```bash
+   cerebrium deploy
+   ```
+   This uses the configuration in `cerebrium.toml` to set up the deployment with appropriate compute resources.
+
+### Known Issues & Solutions
+
+- **Missing hf_transfer package**: Added to requirements.txt and disabled with environment variable `HF_HUB_ENABLE_HF_TRANSFER=0` in main.py
+- **Llama 3.2 1B model access**: If you don't have access, the code is designed to work without it
+- **API Authentication**: Requires an Inference Token from your Cerebrium dashboard
+
+## Using the API
+
+### API Endpoint
+
+Once deployed, the API endpoint will be available at:
+```
+https://api.cortex.cerebrium.ai/v4/{project_id}/{deployment_name}/generate_audio
+```
+
+### Request Format
+
+Make a POST request with the following JSON payload:
+```json
+{
+  "text": "Your text to convert to speech goes here."
+}
+```
+
+### Response Format
+
+The API returns a JSON response with the following structure:
+```json
+{
+  "run_id": "unique-request-id",
+  "result": {
+    "audio_data": "base64-encoded-wav-data",
+    "format": "wav",
+    "encoding": "base64"
+  },
+  "run_time_ms": 300.5
+}
+```
+
+### Authentication
+
+Include your Cerebrium Inference Token in the request headers:
+```
+Authorization: Bearer YOUR_INFERENCE_TOKEN
+```
+
+## Testing the Deployment
+
+### Using the Test Script
+
+This repository includes a `test_deployed_api.py` script to test the deployed API:
+
+```bash
+python test_deployed_api.py --endpoint https://api.cortex.cerebrium.ai/v4/{project_id}/{deployment_name}/generate_audio --token YOUR_INFERENCE_TOKEN
+```
+
+Replace `{project_id}` and `{deployment_name}` with your specific values, and `YOUR_INFERENCE_TOKEN` with the token from your Cerebrium dashboard.
+
+### Sample Code
+
+```python
+import requests
+import base64
+
+# API endpoint and authentication
+endpoint = "https://api.cortex.cerebrium.ai/v4/{project_id}/{deployment_name}/generate_audio"
+token = "YOUR_INFERENCE_TOKEN"
+
+# Request payload
+payload = {"text": "Hello, this is a test of the CSM voice model."}
+
+# Make the request
+response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+# Process the response
+if response.status_code == 200:
+    result = response.json()["result"]
+    audio_data = result["audio_data"]
+    
+    # Save to file
+    with open("output.wav", "wb") as f:
+        f.write(base64.b64decode(audio_data))
+    print("Success! Audio saved to output.wav")
+else:
+    print(f"Error: {response.text}")
+```
+
+## Performance Considerations
+
+- The API typically responds in 300-500ms for short text inputs
+- For longer texts, response time scales approximately linearly
+- The deployment is configured to automatically scale based on demand
+
+## Future Improvements
+
+- Streaming audio response for real-time applications
+- Support for audio context to create more natural continuations
+- Voice cloning capabilities
