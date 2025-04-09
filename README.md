@@ -1,58 +1,87 @@
-# CSM Cerebrium Deployment
+# CSM-1B with Gemini 2.0 Flash Integration
 
-**2025/04/08 UPDATE** - This repository contains a working deployment of the Sesame CSM-1B model on Cerebrium with the Llama-3.2-1B tokenizer. Our implementation generates high-quality speech from text input through a scalable API endpoint.
+**2025/04/08 UPDATE** - This repository contains a working deployment of the Sesame CSM-1B model on Cerebrium with the **Gemini 2.0 Flash** backend replacing the original Llama-3.2-1B model. This implementation generates high-quality speech from text input through a scalable API endpoint.
 
 **Original 2025/03/13** - Sesame released the 1B CSM variant. The checkpoint is [hosted on Hugging Face](https://huggingface.co/sesame/csm-1b).
 
 ---
 
-CSM (Conversational Speech Model) is a speech generation model from [Sesame](https://www.sesame.com) that generates RVQ audio codes from text and audio inputs. The model architecture employs a [Llama](https://www.llama.com/) backbone and a smaller audio decoder that produces [Mimi](https://huggingface.co/kyutai/mimi) audio codes.
+CSM (Conversational Speech Model) is a speech generation model from [Sesame](https://www.sesame.com) that generates RVQ audio codes from text and audio inputs. Our modified implementation replaces the original Llama backbone with Google's **Gemini 2.0 Flash model**, while maintaining the smaller audio decoder that produces [Mimi](https://huggingface.co/kyutai/mimi) audio codes.
 
-A fine-tuned variant of CSM powers the [interactive voice demo](https://www.sesame.com/voicedemo) shown in our [blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice).
+The original fine-tuned variant of CSM powers the [interactive voice demo](https://www.sesame.com/voicedemo) shown in the [Sesame blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice).
 
-A hosted [Hugging Face space](https://huggingface.co/spaces/sesame/csm-1b) is also available for testing audio generation.
+A hosted [Hugging Face space](https://huggingface.co/spaces/sesame/csm-1b) for the original model is also available for testing audio generation.
 
 ## Requirements
 
-* A CUDA-compatible GPU
-* The code has been tested on CUDA 12.4 and 12.6, but it may also work on other versions
-* Similarly, Python 3.10 is recommended, but newer versions may be fine
+* A CUDA-compatible GPU (for local development)
+* Python 3.10+ (local testing done with Python 3.12)
 * For some audio operations, `ffmpeg` may be required
-* Access to the following Hugging Face models:
-  * [Llama-3.2-1B](https://huggingface.co/meta-llama/Llama-3.2-1B)
-  * [CSM-1B](https://huggingface.co/sesame/csm-1b)
+* Access to the [CSM-1B](https://huggingface.co/sesame/csm-1b) Hugging Face model
+* Google API key for accessing the Gemini 2.0 Flash model
+* Cerebrium account for cloud deployment
 
 ### Setup
 
 ```bash
 git clone git@github.com:SesameAILabs/csm.git
 cd csm
-python3.10 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # Disable lazy compilation in Mimi
 export NO_TORCH_COMPILE=1
 
-# You will need access to CSM-1B and Llama-3.2-1B
+# You will need access to CSM-1B
 huggingface-cli login
+
+# Set up your .env file with required credentials
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-### Windows Setup
+### Environment Variables
 
-The `triton` package cannot be installed in Windows. Instead use `pip install triton-windows`.
+Create a `.env` file with the following variables:
 
-## Quickstart
+```
+# Google API key for Gemini access
+GOOGLE_API_KEY=your_google_api_key_here
 
-This script will generate a conversation between 2 characters, using a prompt for each character.
+# Enable Gemini model (set to "true" to use Gemini, "false" to use Llama)
+USE_GEMINI=true
+
+# Gemini model to use
+GEMINI_MODEL=gemini-2.0-flash-exp
+
+# For Cerebrium deployment testing
+CEREBRIUM_API_KEY=your_inference_token_here
+CEREBRIUM_URL=your_deployment_url_here
+```
+
+## Using CSM-1B with Gemini
+
+This implementation replaces the Llama-3.2-1B model with Google's Gemini 2.0 Flash model for text processing while maintaining the same audio generation pipeline.
+
+### Key Files
+
+- `gemini_model.py`: Implementation of the GeminiWrapper class that interfaces with the Gemini API
+- `gemini_tokenizer.py`: Custom tokenizer for Gemini that's compatible with the CSM pipeline
+- `main.py`: Entry point for the Cerebrium deployment with Gemini integration
+
+### Quickstart
+
+To test the model locally with the Gemini backend:
 
 ```bash
-python run_csm.py
+# Make sure your .env file is set up with GOOGLE_API_KEY and USE_GEMINI=true
+python test_gemini_csm.py
 ```
 
 ## Usage
 
-If you want to write your own applications with CSM, the following examples show basic usage.
+If you want to write your own applications with CSM + Gemini, the following examples show basic usage.
 
 #### Generate a sentence
 
@@ -161,6 +190,8 @@ Johan Schalkwyk, Ankit Kumar, Dan Lyth, Sefik Emre Eskimez, Zack Hodari, Cinjon 
 
 ## Overview
 
+Deploying the CSM-1B model with Gemini 2.0 Flash integration to Cerebrium provides a scalable, production-ready API for text-to-speech generation. This section explains how to deploy and test the model on Cerebrium.
+
 This repository extends the CSM-1B model to provide a deployable API on the Cerebrium platform. The implementation enables text-to-speech generation through a simple HTTP endpoint. The deployed API accepts text input and returns base64-encoded WAV audio data.
 
 **Key Features of Our Implementation:**
@@ -262,10 +293,11 @@ This repository extends the CSM-1B model to provide a deployable API on the Cere
 
 ### Known Issues & Solutions
 
+- **Google Generative AI Package**: Ensure you have `google-genai>=0.1.7` in requirements.txt (not just `google-generativeai`)
 - **Missing hf_transfer package**: Added to requirements.txt and disabled with environment variable `HF_HUB_ENABLE_HF_TRANSFER=0` in main.py
-- **Llama 3.2 1B model access**: Required for optimal performance - our implementation now uses the proper Llama-3.2-1B tokenizer
-- **Silent Audio Output**: Fixed by using the correct Llama tokenizer and implementing robust fallback mechanisms
-- **API Authentication**: Requires an Inference Token from your Cerebrium dashboard
+- **Model Compatibility**: The Gemini 2.0 Flash backend replaces the Llama 3.2 1B model, avoiding the need for Llama access
+- **API Import Errors**: We've added error handling to gracefully degrade to standard models if API imports fail
+- **API Authentication**: Requires an Inference Token from your Cerebrium dashboard, set as `CEREBRIUM_API_KEY` in your .env file
 
 ## Using the API
 
@@ -375,17 +407,35 @@ else:
 - **test_phrase.py**: For testing the deployed Cerebrium API
 - **test_with_context.py**: For local testing with proper context handling
 
+## Implementation Details
+
+### Gemini Integration
+
+Our implementation makes several key modifications to integrate Gemini 2.0 Flash:
+
+1. **GeminiWrapper Class**: Mimics the interface of the Llama transformer for seamless integration
+2. **Custom Tokenization**: Implements a `GeminiTokenizer` class that interfaces with the Gemini API
+3. **Fallback Mechanism**: Gracefully handles API errors and falls back to standard models if needed
+4. **Deterministic Hashing**: Generates unique token IDs based on input text to ensure consistent tokenization
+
+### Testing Scripts
+
+- **test_deployed_gemini.py**: For testing the deployed Cerebrium API with Gemini
+- **test_gemini_csm.py**: For local testing of the Gemini integration
+- **test_with_context.py**: For local testing with proper context handling
+
 ## Best Practices
 
 1. **Test Locally First**: Always test changes locally before deploying to Cerebrium
 2. **Use Context When Possible**: The model works best with proper context
-3. **Monitor Log Output**: Check for warnings about empty samples or retries
-4. **Verify Audio Quality**: Always verify the audio outputs match expectations
-5. **Track File Sizes**: Silent audio typically has a larger file size with repeating patterns
+3. **Set Proper Environment Variables**: Ensure all API keys and configuration settings are correct
+4. **Monitor Log Output**: Check for warnings about API errors or retries
+5. **Verify Audio Quality**: Always verify the audio outputs match expectations
 
 ## Future Improvements
 
 - Streaming audio response for real-time applications
 - Better context handling for more natural conversational speech
-- Voice cloning capabilities
+- Voice cloning capabilities using Gemini's context handling
 - Fine-tuning for specialized domains
+- Integration with Gemini's multimodal capabilities for audio and text inputs
