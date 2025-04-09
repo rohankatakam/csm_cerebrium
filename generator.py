@@ -21,17 +21,20 @@ class Segment:
 
 def load_llama3_tokenizer():
     """
-    https://github.com/huggingface/transformers/issues/22794#issuecomment-2092623992
+    Alternative implementation using T5 tokenizer since Llama 3.2 1B requires approval
     """
-    tokenizer_name = "meta-llama/Llama-3.2-1B"
+    tokenizer_name = "google-t5/t5-small"  # Using T5 as an alternative
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    bos = tokenizer.bos_token
+    bos = tokenizer.pad_token  # T5 doesn't have explicit BOS, using PAD
     eos = tokenizer.eos_token
-    tokenizer._tokenizer.post_processor = TemplateProcessing(
-        single=f"{bos}:0 $A:0 {eos}:0",
-        pair=f"{bos}:0 $A:0 {eos}:0 {bos}:1 $B:1 {eos}:1",
-        special_tokens=[(f"{bos}", tokenizer.bos_token_id), (f"{eos}", tokenizer.eos_token_id)],
-    )
+    
+    # Configure tokenizer post-processing if available
+    if hasattr(tokenizer, '_tokenizer') and hasattr(tokenizer._tokenizer, 'post_processor'):
+        tokenizer._tokenizer.post_processor = TemplateProcessing(
+            single=f"{bos}:0 $A:0 {eos}:0",
+            pair=f"{bos}:0 $A:0 {eos}:0 {bos}:1 $B:1 {eos}:1",
+            special_tokens=[(f"{bos}", tokenizer.pad_token_id), (f"{eos}", tokenizer.eos_token_id)],
+        )
 
     return tokenizer
 

@@ -7,3 +7,5 @@ moshi==0.2.2
 torchtune==0.4.0
 torchao==0.9.0
 silentcipher @ git+https://github.com/SesameAILabs/silentcipher@master
+hf_transfer==0.1.5
+soundfile>=0.12.1
